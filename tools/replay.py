@@ -734,9 +734,6 @@ def main():
             'idle_time': format_time(idle_time)
         }
         display_execution_time(metrics)
-        
-        # Display the total session cost
-        print(f"\nTotal CAI Session Cost: ${COST_TRACKER.session_total_cost:.6f}")
 
     except FileNotFoundError:
         print(color(f"Error: File {jsonl_file_path} not found", fg="red"))
