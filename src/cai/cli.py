@@ -564,9 +564,24 @@ def run_cai_cli(
                     
                     # Just get the existing agent that was already switched
                     from cai.sdk.agents.simple_agent_manager import AGENT_MANAGER
-                    agent = AGENT_MANAGER.get_active_agent()
+                    
+                    # First try to get the strong reference if available
+                    if hasattr(AGENT_MANAGER, '_current_agent_strong_ref'):
+                        agent = AGENT_MANAGER._current_agent_strong_ref
+                        # Clear the strong reference after using it
+                        delattr(AGENT_MANAGER, '_current_agent_strong_ref')
+                    else:
+                        agent = AGENT_MANAGER.get_active_agent()
+                    
                     if agent:
                         last_agent_type = current_agent_type
+                    else:
+                        # If the agent is None (weak reference expired), recreate it
+                        agent = get_agent_by_name(current_agent_type, agent_id="P1")
+                        last_agent_type = current_agent_type
+                        # Re-register with AGENT_MANAGER
+                        agent_name = agent.name if hasattr(agent, "name") else current_agent_type
+                        AGENT_MANAGER.set_active_agent(agent, agent_name, "P1")
                     continue
                 
                 try:
@@ -608,13 +623,11 @@ def run_cai_cli(
                     # This ensures the model has its own history from AGENT_MANAGER
                     if hasattr(agent, "model") and hasattr(agent.model, "message_history"):
                         agent_history = AGENT_MANAGER.get_message_history(agent_name)
-                        print(f"[DEBUG] Got agent history with {len(agent_history) if agent_history else 0} messages")
                         # Clear model's history and sync with AGENT_MANAGER
                         agent.model.message_history.clear()
                         if agent_history:
                             # Use extend() to avoid circular addition
                             agent.model.message_history.extend(agent_history)
-                            print(f"[DEBUG] Synced {len(agent_history)} messages to model's message_history")
 
                     # Configure the new agent's model flags
                     if hasattr(agent, "model"):
