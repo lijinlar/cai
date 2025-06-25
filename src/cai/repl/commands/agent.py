@@ -352,16 +352,21 @@ class AgentCommand(Command):
                     # Get current history before switching to parallel mode
                     current_history = []
                     
+                    console.print("\n[bold yellow]DEBUG: Getting history before switching to parallel mode[/bold yellow]")
+                    
                     # First check for pending history transfer
                     if hasattr(AGENT_MANAGER, '_pending_history_transfer') and AGENT_MANAGER._pending_history_transfer:
                         current_history = AGENT_MANAGER._pending_history_transfer
+                        console.print(f"[yellow]DEBUG: Found pending history transfer with {len(current_history)} messages[/yellow]")
                         AGENT_MANAGER._pending_history_transfer = None
                     else:
                         # Try to get history from ALL message histories first
                         # This ensures we get history even from non-active agents
+                        console.print(f"[yellow]DEBUG: Checking _message_history: {list(AGENT_MANAGER._message_history.keys())}[/yellow]")
                         for agent_name, hist in AGENT_MANAGER._message_history.items():
                             if hist:
                                 current_history = hist
+                                console.print(f"[yellow]DEBUG: Found history in _message_history['{agent_name}'] with {len(hist)} messages[/yellow]")
                                 break
                         
                         # If still no history, try the current active agent
@@ -370,10 +375,12 @@ class AgentCommand(Command):
                             if current_agent:
                                 # Get the agent's name
                                 agent_name = getattr(current_agent, 'name', None)
+                                console.print(f"[yellow]DEBUG: Active agent name: {agent_name}[/yellow]")
                                 if agent_name:
                                     hist = AGENT_MANAGER.get_message_history(agent_name)
                                     if hist:
                                         current_history = hist
+                                        console.print(f"[yellow]DEBUG: Found history from active agent with {len(hist)} messages[/yellow]")
                         
                         # Special handling: if we still don't have history but have an active agent
                         # This can happen when the default agent is loaded at startup
@@ -381,6 +388,9 @@ class AgentCommand(Command):
                             # Try to get history from the model directly
                             if hasattr(current_agent, 'model') and hasattr(current_agent.model, 'message_history'):
                                 current_history = current_agent.model.message_history
+                                console.print(f"[yellow]DEBUG: Found history from model.message_history with {len(current_history)} messages[/yellow]")
+                    
+                    console.print(f"[yellow]DEBUG: Final current_history has {len(current_history)} messages[/yellow]")
                     
                     if hasattr(pattern, "configs") and pattern.configs is not None:
                         # Clear existing configs and instances
@@ -517,14 +527,13 @@ class AgentCommand(Command):
             # selected_agent_key was already set above in the agent selection logic
             pass
 
-        # Set the agent key in environment variable (not the agent name)
-        # Note: selected_agent_key should be defined by now either from regular agent selection
-        # or from swarm pattern handling
-        # IMPORTANT: Don't set CAI_AGENT_TYPE for parallel patterns as they don't change the current agent
+        # IMPORTANT: Don't set CAI_AGENT_TYPE yet - we need to set up history transfer first
+        # Store the selected agent key for later use
+        agent_type_to_set = None
         if 'selected_agent_key' in locals() and not (hasattr(agent, "_pattern") and 
                                                       hasattr(agent._pattern, "type") and 
                                                       str(getattr(agent._pattern.type, 'value', agent._pattern.type)) == "parallel"):
-            os.environ["CAI_AGENT_TYPE"] = selected_agent_key
+            agent_type_to_set = selected_agent_key
             
             # IMPORTANT: Ensure agent_name is correctly set for the selected agent
             # This fixes the issue where swarm pattern's agent name lingers
@@ -583,9 +592,11 @@ class AgentCommand(Command):
                         break
         else:
             # We're switching from single agent to another single agent (or from swarm pattern)
+            
             # First check if there's a pending history transfer
             if hasattr(AGENT_MANAGER, '_pending_history_transfer') and AGENT_MANAGER._pending_history_transfer:
                 current_history = AGENT_MANAGER._pending_history_transfer
+                console.print(f"[yellow]DEBUG: Found pending history transfer with {len(current_history)} messages[/yellow]")
                 AGENT_MANAGER._pending_history_transfer = None
             else:
                 # Get history from all registered agents (not just active ones)
@@ -605,6 +616,7 @@ class AgentCommand(Command):
                     for display_name, hist in all_histories.items():
                         if hist:
                             current_history = hist
+                            console.print(f"[yellow]DEBUG: Found history from registered agent '{display_name}' with {len(hist)} messages[/yellow]")
                             break
                 
                 # Special handling for swarm patterns - get history from the entry agent
@@ -646,7 +658,16 @@ class AgentCommand(Command):
             new_agent = get_agent_by_name(selected_agent_key, agent_id="P1")
             new_agent_name = getattr(new_agent, "name", selected_agent_key)
             AGENT_MANAGER.switch_to_single_agent(new_agent, new_agent_name)
+            
+            # Check if history was transferred
+            transferred_history = AGENT_MANAGER.get_message_history(new_agent_name)
 
+        # NOW set the environment variable AFTER history transfer is complete
+        if agent_type_to_set:
+            os.environ["CAI_AGENT_TYPE"] = agent_type_to_set
+            # Set a flag to tell CLI not to switch again
+            os.environ["CAI_AGENT_SWITCH_HANDLED"] = "1"
+        
         # Double-check agent_name is correct before displaying
         # This ensures we show the correct agent name even after switching from patterns
         final_agent_name = agent_name
